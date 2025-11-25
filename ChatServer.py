@@ -4,7 +4,7 @@ import threading
 from chatcore.protocol import encode_message, decode_message
 from chatcore.handlers import broadcast_message, on_client_join, on_client_leave
 
-HOST = "0.0.0.0"
+HOST = "10.101.170.14"
 PORT = 5555
 
 clients = []  # holds sockets
