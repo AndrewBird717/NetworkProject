@@ -5,7 +5,7 @@ from chatcore.handlers import broadcast_message, on_client_join, on_client_leave
 from chatcore.tls import create_server_context, wrap_server_connection
 
 
-HOST = "0.0.0.0"
+HOST = "10.101.170.14"
 PORT = 5555
 
 clients = []  # holds sockets
