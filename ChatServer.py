@@ -47,5 +47,30 @@ def start_server():
             thread = threading.Thread(target=handle_client, args=(conn, addr), daemon=True)
             thread.start()
 
+def handle_delete_request(self, client_id, msg_id):
+    for msg in self.history:
+        if msg.msg_id == msg_id:
+            if msg.sender_id != client_id:
+                self.send_to(client_id, {
+                    "type": "error",
+                    "message": "You cannot delete someone else’s message."
+                })
+                return
+            
+            self.history = [m for m in self.history if m.msg_id != msg_id]
+
+            deletion_notice = {
+                "type": "delete_broadcast",
+                "msg_id": msg_id
+            }
+            self.broadcast(deletion_notice)
+            return
+    
+    self.send_to(client_id, {
+        "type": "error",
+        "message": "Message ID not found."
+    })
+
+
 if __name__ == "__main__":
     start_server()
