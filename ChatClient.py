@@ -50,14 +50,14 @@ def start_client():
 
         print("Connected over TLS! Type messages and press Enter.")
         
-        thread = threading.Thread(target=listen, args=(sock,), daemon=True)
+        thread = threading.Thread(target=listen, args=(tls_sock,), daemon=True)
         thread.start()
 
         while True:
             try:
                 msg = input()
                 encoded = encode_message(username, msg)
-                sock.sendall(encoded)
+                tls_sock.sendall(encoded)
             except KeyboardInterrupt:
                 print("\nExiting...")
                 break
