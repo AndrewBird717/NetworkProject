@@ -15,6 +15,7 @@ class CommandContext:
     clients: list             # list of all client sockets
     broadcast_message: object # function(sender, payload, clients)
     encode_message: object    # function(sender, text) -> bytes
+    state: object
 
 
 def cmd_help(ctx: CommandContext, args: str):
@@ -35,13 +36,38 @@ def cmd_me(ctx: CommandContext, args: str):
     payload = ctx.encode_message("SYSTEM", msg_text)
     ctx.broadcast_message("SYSTEM", payload, ctx.clients)
 
+def cmd_delete(ctx: CommandContext, args: str):
+    """Delete one of your messages: /delete <id>"""
+    if not args.strip():
+        ctx.conn.sendall(ctx.encode_message("SYSTEM", "Usage: /delete <id>"))
+        return
+
+    try:
+        msg_id = int(args.strip().split()[0])
+    except ValueError:
+        ctx.conn.sendall(ctx.encode_message("SYSTEM", "Usage: /delete <id>"))
+        return
+
+    success = ctx.state.delete_message(msg_id, ctx.sender)
+    if not success:
+        ctx.conn.sendall(
+            ctx.encode_message("SYSTEM", f"Cannot delete message #{msg_id}")
+        )
+        return
+
+    ctx.broadcast_message(
+        "SYSTEM",
+        ctx.encode_message("SYSTEM", f"Message #{msg_id} deleted by {ctx.sender}"),
+        ctx.clients,
+    )
+
+
 
 # Registry of commands
 COMMANDS = {
     "help": cmd_help,
     "me": cmd_me,
-    # later you can add:
-    # "delete": cmd_delete,
+    "delete": cmd_delete,
     # "history": cmd_history,
 }
 

@@ -4,6 +4,7 @@ from chatcore.protocol import encode_message, decode_message
 from chatcore.handlers import broadcast_message, on_client_join, on_client_leave
 from chatcore.tls import create_server_context, wrap_server_connection
 from chatcore.commands import CommandContext, handle_command
+from chatcore.state import ChatState
 
 
 
@@ -11,6 +12,7 @@ HOST = "10.0.0.115"
 PORT = 5555
 
 clients = []  # holds sockets
+state = ChatState()
 
 def handle_client(conn, addr):
     on_client_join(addr)
@@ -26,26 +28,19 @@ def handle_client(conn, addr):
             if text is None:
                 continue
 
-            # Build a context object for command handling
-            ctx = CommandContext(
-                conn=conn,
-                sender=sender,
-                clients=clients,
-                broadcast_message=broadcast_message,
-                encode_message=encode_message,
-            )
-
-            # If it's a slash-command, let the commands module handle it
-            if handle_command(ctx, text):
-                # Command handled (or at least recognized)
-                # -> don't treat it as a normal chat message
+            # --- /refresh command: just send this client full history ---
+            if text.strip() == "/refresh":
+                send_full_history(conn)
                 continue
 
-            # Normal chat message (no leading "/")
-            print(f"[{sender}] {text}")
+            # --- normal chat message: store + broadcast ---
+            # normal chat message: store + broadcast with ID
+            stored = state.add_message(sender, text)           # <-- get the assigned ID
+            display_text = f"#{stored['id']} {text}"           # <-- prefix ID
+            print(f"[{sender}] {display_text}")                # server console shows ID
+            payload = encode_message(sender, display_text)     # broadcast with ID
+            broadcast_message(sender, payload, clients)        # send to all
 
-            # Broadcast raw bytes exactly as received to others
-            broadcast_message(sender, raw, clients, exclude=conn)
 
     except ConnectionResetError:
         pass
@@ -54,6 +49,18 @@ def handle_client(conn, addr):
             clients.remove(conn)
         on_client_leave(addr)
         conn.close()
+
+
+def send_full_history(conn):
+    """Send the entire chat history to a single client."""
+    for msg in state.all_messages():
+        display_text = f"#{msg['id']} {msg['text']}"   # <-- ADD ID HERE
+        payload = encode_message(msg["sender"], display_text)       
+        try:
+            conn.sendall(payload)
+        except:
+            break
+
 
 
 def start_server():

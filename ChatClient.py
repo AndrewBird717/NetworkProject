@@ -1,6 +1,8 @@
 import socket
 import threading
 import sys
+import os
+import platform
 from chatcore.protocol import encode_message, decode_message
 from chatcore.tls import create_client_context, wrap_client_socket
 
@@ -25,7 +27,10 @@ def listen(sock):
 
             sender, text = decode_message(raw)
             if sender:
-                print(f"\n[{sender}] {text}")
+                sys.stdout.write("\r")            # return to start of line
+                sys.stdout.write(f"[{sender}] {text}\n")
+                sys.stdout.write(f"[{username}] ")  # redraw prompt
+                sys.stdout.flush()        
         except:
             break
 
@@ -55,12 +60,36 @@ def start_client():
 
         while True:
             try:
-                msg = input()
+                msg = input(f"[{username}] ")
+                if not msg.strip():
+                    continue  # ignore empty inputs
+
+        # ---- /refresh command handler ----
+                if msg.strip() == "/refresh":
+                    clear_terminal()   # CLEAR CLIENT SCREEN FIRST
+                    encoded = encode_message(username, "/refresh")
+                    tls_sock.sendall(encoded)  # ask server for history
+                    continue  # do NOT send refresh as chat text
+
+        # ---- normal chat message ----
                 encoded = encode_message(username, msg)
                 tls_sock.sendall(encoded)
+
             except KeyboardInterrupt:
                 print("\nExiting...")
                 break
+
+
+def clear_terminal():
+    # Move cursor to top-left and clear everything
+    if platform.system() == "Windows":
+        os.system("cls")
+    else:
+        os.system("clear")
+
+    # ALSO force flush to ensure immediate redraw
+    sys.stdout.flush()
+
 
 if __name__ == "__main__":
     start_client()
