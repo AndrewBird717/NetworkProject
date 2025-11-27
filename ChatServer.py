@@ -3,9 +3,11 @@ import threading
 from chatcore.protocol import encode_message, decode_message
 from chatcore.handlers import broadcast_message, on_client_join, on_client_leave
 from chatcore.tls import create_server_context, wrap_server_connection
+from chatcore.commands import CommandContext, handle_command
 
 
-HOST = "10.101.170.14"
+
+HOST = "10.0.0.115"
 PORT = 5555
 
 clients = []  # holds sockets
@@ -24,17 +26,35 @@ def handle_client(conn, addr):
             if text is None:
                 continue
 
+            # Build a context object for command handling
+            ctx = CommandContext(
+                conn=conn,
+                sender=sender,
+                clients=clients,
+                broadcast_message=broadcast_message,
+                encode_message=encode_message,
+            )
+
+            # If it's a slash-command, let the commands module handle it
+            if handle_command(ctx, text):
+                # Command handled (or at least recognized)
+                # -> don't treat it as a normal chat message
+                continue
+
+            # Normal chat message (no leading "/")
             print(f"[{sender}] {text}")
 
-            # Broadcast raw bytes exactly as received
+            # Broadcast raw bytes exactly as received to others
             broadcast_message(sender, raw, clients, exclude=conn)
 
     except ConnectionResetError:
-        pass  
+        pass
     finally:
-        clients.remove(conn)
+        if conn in clients:
+            clients.remove(conn)
         on_client_leave(addr)
         conn.close()
+
 
 def start_server():
     print(f"Server running on {HOST}:{PORT} ...")
@@ -61,29 +81,6 @@ def start_server():
             thread = threading.Thread(target=handle_client, args=(tls_conn, addr), daemon=True)
             thread.start()
 
-def handle_delete_request(self, client_id, msg_id):
-    for msg in self.history:
-        if msg.msg_id == msg_id:
-            if msg.sender_id != client_id:
-                self.send_to(client_id, {
-                    "type": "error",
-                    "message": "You cannot delete someone else’s message."
-                })
-                return
-            
-            self.history = [m for m in self.history if m.msg_id != msg_id]
-
-            deletion_notice = {
-                "type": "delete_broadcast",
-                "msg_id": msg_id
-            }
-            self.broadcast(deletion_notice)
-            return
-    
-    self.send_to(client_id, {
-        "type": "error",
-        "message": "Message ID not found."
-    })
 
 
 if __name__ == "__main__":
