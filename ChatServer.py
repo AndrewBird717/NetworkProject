@@ -1,20 +1,38 @@
 import socket
 import threading
+
 from chatcore.protocol import encode_message, decode_message
 from chatcore.handlers import broadcast_message, on_client_join, on_client_leave
 from chatcore.tls import create_server_context, wrap_server_connection
-from chatcore.commands import CommandContext, handle_command
 from chatcore.state import ChatState
+from chatcore.commands import CommandContext, handle_command
 
-
-
-HOST = "10.0.0.115"
+HOST = "10.0.0.115"   # adjust if needed
 PORT = 5555
 
-clients = []  # holds sockets
-state = ChatState()
+clients = []          # list of active client sockets
+state = ChatState()   # shared in-memory chat history
+
+
+def send_full_history(conn):
+    """
+    Send the entire chat history (with IDs) to a single client.
+    Used by the /refresh command.
+    """
+    for msg in state.all_messages():
+        display_text = f"#{msg['id']} {msg['text']}"
+        payload = encode_message(msg["sender"], display_text)
+        try:
+            conn.sendall(payload)
+        except Exception:
+            break
+
 
 def handle_client(conn, addr):
+    """
+    Per-client handler: receive messages, route commands,
+    and broadcast chat to others.
+    """
     on_client_join(addr)
     clients.append(conn)
 
@@ -28,39 +46,40 @@ def handle_client(conn, addr):
             if text is None:
                 continue
 
-            # --- /refresh command: just send this client full history ---
-            if text.strip() == "/refresh":
-                send_full_history(conn)
+            # Build command context for this message
+            ctx = CommandContext(
+                conn=conn,
+                sender=sender,
+                state=state,
+                clients=clients,
+                send_full_history=send_full_history,
+                broadcast_message=broadcast_message,
+            )
+
+            # 1) If the text is a command (starts with "/"), handle it
+            if handle_command(ctx, text):
+                # Command was processed (or rejected). Do not treat as chat.
                 continue
 
-            # --- normal chat message: store + broadcast ---
-            # normal chat message: store + broadcast with ID
-            stored = state.add_message(sender, text)           # <-- get the assigned ID
-            display_text = f"#{stored['id']} {text}"           # <-- prefix ID
-            print(f"[{sender}] {display_text}")                # server console shows ID
-            payload = encode_message(sender, display_text)     # broadcast with ID
-            broadcast_message(sender, payload, clients)        # send to all
+            # 2) Normal chat message: store + broadcast with ID
+            stored = state.add_message(sender, text)
+            display_text = f"#{stored['id']} {text}"
 
+            print(f"[{sender}] {display_text}")
+
+            payload = encode_message(sender, display_text)
+            # Broadcast to all clients (including sender)
+            broadcast_message(sender, payload, clients)
 
     except ConnectionResetError:
+        # Client disconnected abruptly
         pass
+
     finally:
         if conn in clients:
             clients.remove(conn)
         on_client_leave(addr)
         conn.close()
-
-
-def send_full_history(conn):
-    """Send the entire chat history to a single client."""
-    for msg in state.all_messages():
-        display_text = f"#{msg['id']} {msg['text']}"   # <-- ADD ID HERE
-        payload = encode_message(msg["sender"], display_text)       
-        try:
-            conn.sendall(payload)
-        except:
-            break
-
 
 
 def start_server():
@@ -85,9 +104,12 @@ def start_server():
                 conn.close()
                 continue
 
-            thread = threading.Thread(target=handle_client, args=(tls_conn, addr), daemon=True)
+            thread = threading.Thread(
+                target=handle_client,
+                args=(tls_conn, addr),
+                daemon=True,
+            )
             thread.start()
-
 
 
 if __name__ == "__main__":

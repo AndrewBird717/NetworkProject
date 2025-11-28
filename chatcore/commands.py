@@ -1,91 +1,85 @@
 # chatcore/commands.py
-#
-# Central place to define chat commands like:
-#   /help
-#   /me <action>
-# and later:
-#   /delete <id>, /history, /nick, etc.
+# Central command handling for the chat server.
 
 from dataclasses import dataclass
+from typing import Callable, List, Any
+from chatcore.protocol import encode_message
+
 
 @dataclass
 class CommandContext:
-    conn: object              # client's socket
-    sender: str               # username (from protocol)
-    clients: list             # list of all client sockets
-    broadcast_message: object # function(sender, payload, clients)
-    encode_message: object    # function(sender, text) -> bytes
-    state: object
+    conn: Any                    # the client's socket
+    sender: str                  # username of the client
+    state: Any                   # ChatState instance
+    clients: List[Any]           # list of all client sockets
+    send_full_history: Callable  # function(conn) -> None
+    broadcast_message: Callable  # function(sender, payload, clients)
+    # encode_message already imported here
 
 
-def cmd_help(ctx: CommandContext, args: str):
-    """Show available commands."""
-    names = sorted(COMMANDS.keys())
-    text = "Available commands: " + ", ".join(f"/{n}" for n in names)
-    ctx.conn.sendall(ctx.encode_message("SYSTEM", text))
+def cmd_refresh(ctx: CommandContext, args: str) -> None:
+    """
+    /refresh
+    Clears the client's screen (on client side) and re-sends history.
+    Server side: just send full history to this client.
+    """
+    ctx.send_full_history(ctx.conn)
 
 
-def cmd_me(ctx: CommandContext, args: str):
-    """Emote-style message: /me waves -> *alice waves*"""
-    if not args.strip():
-        ctx.conn.sendall(ctx.encode_message("SYSTEM", "Usage: /me <action>"))
-        return
-
-    # Broadcast a system-style message to everyone
-    msg_text = f"*{ctx.sender} {args.strip()}*"
-    payload = ctx.encode_message("SYSTEM", msg_text)
-    ctx.broadcast_message("SYSTEM", payload, ctx.clients)
-
-def cmd_delete(ctx: CommandContext, args: str):
-    """Delete one of your messages: /delete <id>"""
-    if not args.strip():
-        ctx.conn.sendall(ctx.encode_message("SYSTEM", "Usage: /delete <id>"))
+def cmd_delete(ctx: CommandContext, args: str) -> None:
+    """
+    /delete <id>
+    Marks one of the sender's messages as deleted.
+    """
+    args = args.strip()
+    if not args:
+        ctx.conn.sendall(encode_message("SYSTEM", "Usage: /delete <id>"))
         return
 
     try:
-        msg_id = int(args.strip().split()[0])
+        msg_id = int(args.split()[0])
     except ValueError:
-        ctx.conn.sendall(ctx.encode_message("SYSTEM", "Usage: /delete <id>"))
+        ctx.conn.sendall(encode_message("SYSTEM", "Usage: /delete <id>"))
         return
 
     success = ctx.state.delete_message(msg_id, ctx.sender)
     if not success:
         ctx.conn.sendall(
-            ctx.encode_message("SYSTEM", f"Cannot delete message #{msg_id}")
+            encode_message("SYSTEM", f"Cannot delete message #{msg_id}")
         )
         return
 
-    ctx.broadcast_message(
-        "SYSTEM",
-        ctx.encode_message("SYSTEM", f"Message #{msg_id} deleted by {ctx.sender}"),
-        ctx.clients,
+    # Notify all clients that deletion occurred
+    notice = encode_message(
+        "SYSTEM", f"Message #{msg_id} deleted by {ctx.sender}"
     )
+    ctx.broadcast_message("SYSTEM", notice, ctx.clients)
 
 
-
-# Registry of commands
+# Registry of supported commands
 COMMANDS = {
-    "help": cmd_help,
-    "me": cmd_me,
+    "refresh": cmd_refresh,
     "delete": cmd_delete,
-    # "history": cmd_history,
 }
 
 
 def handle_command(ctx: CommandContext, text: str) -> bool:
     """
-    Parse and execute a slash command like '/help' or '/me waves'.
+    Detect and execute a slash command.
 
     Returns:
-        True  -> it WAS a command (handled or at least recognized)
-        False -> not a command; treat as normal chat
+        True  -> the text was a command (handled or rejected)
+        False -> not a command; treat as a normal chat message
     """
     if not text.startswith("/"):
         return False
 
-    body = text[1:]
+    # Strip leading "/" and split into name + args
+    body = text[1:].strip()
     if not body:
-        ctx.conn.sendall(ctx.encode_message("SYSTEM", "Empty command."))
+        ctx.conn.sendall(
+            encode_message("SYSTEM", "Empty command. Try /refresh or /delete <id>.")
+        )
         return True
 
     parts = body.split(maxsplit=1)
@@ -95,7 +89,7 @@ def handle_command(ctx: CommandContext, text: str) -> bool:
     cmd = COMMANDS.get(name)
     if cmd is None:
         ctx.conn.sendall(
-            ctx.encode_message("SYSTEM", f"Unknown command: /{name}")
+            encode_message("SYSTEM", f"Unknown command: /{name}")
         )
         return True
 

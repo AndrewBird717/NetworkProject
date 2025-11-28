@@ -6,6 +6,21 @@ import platform
 from chatcore.protocol import encode_message, decode_message
 from chatcore.tls import create_client_context, wrap_client_socket
 
+# -------- COLOR DEFINITIONS --------
+COLORS = {
+    "reset": "\033[0m",
+    "red": "\033[31m",
+    "green": "\033[32m",
+    "yellow": "\033[33m",
+    "blue": "\033[34m",
+    "magenta": "\033[35m",
+    "cyan": "\033[36m",
+    "white": "\033[37m",
+}
+
+MY_COLOR = COLORS["red"]  # default user message color
+
+# -----------------------------------
 
 if len(sys.argv) < 2:
     print("Usage: python ChatClient.py [SERVER_IP]")
@@ -13,11 +28,19 @@ if len(sys.argv) < 2:
 
 SERVER = sys.argv[1]
 PORT = 5555
-
 username = input("Enter username: ")
 
+def clear_terminal():
+    """Clear the terminal screen on Windows or Unix-like OS."""
+    if platform.system() == "Windows":
+        os.system("cls")
+    else:
+        sys.stdout.write("\033[2J\033[H")  # ANSI clear for all modern terminals
+        sys.stdout.flush()
+
 def listen(sock):
-    """Background thread to receive messages."""
+    """Background thread to receive and print messages."""
+    global MY_COLOR
     while True:
         try:
             raw = sock.recv(1024)
@@ -27,11 +50,15 @@ def listen(sock):
 
             sender, text = decode_message(raw)
             if sender:
-                sys.stdout.write("\r")            # return to start of line
-                sys.stdout.write(f"[{sender}] {text}\n")
+                # Choose display color: my messages = MY_COLOR, others normal
+                color = MY_COLOR if sender == username else COLORS["reset"]
+
+                sys.stdout.write("\r")  # start of line
+                sys.stdout.write(f"{color}[{sender}] {text}{COLORS['reset']}\n")
                 sys.stdout.write(f"[{username}] ")  # redraw prompt
-                sys.stdout.flush()        
-        except:
+                sys.stdout.flush()
+
+        except Exception:
             break
 
 def start_client():
@@ -41,6 +68,7 @@ def start_client():
         except:
             print("Could not connect to server.")
             return
+
         tls_context = create_client_context(verify=False)
 
         try:
@@ -54,41 +82,42 @@ def start_client():
             return
 
         print("Connected over TLS! Type messages and press Enter.")
-        
+
         thread = threading.Thread(target=listen, args=(tls_sock,), daemon=True)
         thread.start()
 
+        # ---------- SEND LOOP ----------
         while True:
             try:
                 msg = input(f"[{username}] ")
                 if not msg.strip():
-                    continue  # ignore empty inputs
+                    continue
 
-        # ---- /refresh command handler ----
+                # ----- LOCAL COMMAND: /color <name> -----
+                if msg.startswith("/color "):
+                    global MY_COLOR
+                    color_name = msg.split(maxsplit=1)[1].strip().lower()
+                    if color_name not in COLORS or color_name == "reset":
+                        print("[SYSTEM] Valid colors: red, green, yellow, blue, magenta, cyan, white")
+                        continue
+                    MY_COLOR = COLORS[color_name]
+                    print(f"[SYSTEM] Color changed to {color_name}")
+                    continue  # don't send to server
+
+                # ----- /refresh command -----
                 if msg.strip() == "/refresh":
-                    clear_terminal()   # CLEAR CLIENT SCREEN FIRST
+                    clear_terminal()
                     encoded = encode_message(username, "/refresh")
-                    tls_sock.sendall(encoded)  # ask server for history
-                    continue  # do NOT send refresh as chat text
+                    tls_sock.sendall(encoded)
+                    continue
 
-        # ---- normal chat message ----
+                # ----- NORMAL CHAT MESSAGE -----
                 encoded = encode_message(username, msg)
                 tls_sock.sendall(encoded)
 
             except KeyboardInterrupt:
                 print("\nExiting...")
                 break
-
-
-def clear_terminal():
-    # Move cursor to top-left and clear everything
-    if platform.system() == "Windows":
-        os.system("cls")
-    else:
-        os.system("clear")
-
-    # ALSO force flush to ensure immediate redraw
-    sys.stdout.flush()
 
 
 if __name__ == "__main__":
