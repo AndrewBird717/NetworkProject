@@ -18,8 +18,7 @@ COLORS = {
     "white": "\033[37m",
 }
 
-MY_COLOR = COLORS["red"]  # default user message color
-
+MY_COLOR = COLORS["red"]  # default self-message color
 # -----------------------------------
 
 if len(sys.argv) < 2:
@@ -30,16 +29,19 @@ SERVER = sys.argv[1]
 PORT = 5555
 username = input("Enter username: ")
 
+CHAT_HISTORY = []
+
+
 def clear_terminal():
-    """Clear the terminal screen on Windows or Unix-like OS."""
+    """Clear the terminal window."""
     if platform.system() == "Windows":
         os.system("cls")
     else:
-        sys.stdout.write("\033[2J\033[H")  # ANSI clear for all modern terminals
+        sys.stdout.write("\033[2J\033[H")  # ANSI wipe
         sys.stdout.flush()
 
 def listen(sock):
-    """Background thread to receive and print messages."""
+    """Background thread to receive chat messages."""
     global MY_COLOR
     while True:
         try:
@@ -50,12 +52,23 @@ def listen(sock):
 
             sender, text = decode_message(raw)
             if sender:
-                # Choose display color: my messages = MY_COLOR, others normal
+                # Color my own messages only
                 color = MY_COLOR if sender == username else COLORS["reset"]
 
-                sys.stdout.write("\r")  # start of line
-                sys.stdout.write(f"{color}[{sender}] {text}{COLORS['reset']}\n")
-                sys.stdout.write(f"[{username}] ")  # redraw prompt
+                # store message
+                CHAT_HISTORY.append((sender, text))
+
+                clear_terminal()
+
+                for s, t in CHAT_HISTORY:
+                    if s.startswith(username):  # your own messages
+                        print(f"{MY_COLOR}[{s}] {t}{COLORS['reset']}")
+                    else:
+                        print(f"[{s}] {t}")
+
+                #sys.stdout.write("\r")  # move cursor to start of line
+                #sys.stdout.write(f"{color}[{sender}] {text}{COLORS['reset']}\n")
+                sys.stdout.write(f"[{username}] ")
                 sys.stdout.flush()
 
         except Exception:
@@ -73,9 +86,7 @@ def start_client():
 
         try:
             tls_sock = wrap_client_socket(
-                sock,
-                tls_context,
-                server_hostname=SERVER or "localhost",
+                sock, tls_context, server_hostname=SERVER or "localhost"
             )
         except Exception as e:
             print(f"TLS handshake failed: {e}")
@@ -86,39 +97,43 @@ def start_client():
         thread = threading.Thread(target=listen, args=(tls_sock,), daemon=True)
         thread.start()
 
-        # ---------- SEND LOOP ----------
+        # ----- SEND LOOP -----
         while True:
             try:
-                msg = input(f"[{username}] ")
-                if not msg.strip():
+                msg = input(f"[{username}] ").strip()
+                if not msg:
                     continue
 
-                # ----- LOCAL COMMAND: /color <name> -----
+                # ===== LOCAL COMMAND: /exit =====
+                if msg == "/exit":
+                    print("[SYSTEM] Exiting chat...")
+                    tls_sock.close()
+                    sys.exit(0)
+
+                # ===== LOCAL COMMAND: /color <color> =====
                 if msg.startswith("/color "):
                     global MY_COLOR
-                    color_name = msg.split(maxsplit=1)[1].strip().lower()
+                    color_name = msg.split(maxsplit=1)[1].lower()
                     if color_name not in COLORS or color_name == "reset":
                         print("[SYSTEM] Valid colors: red, green, yellow, blue, magenta, cyan, white")
                         continue
                     MY_COLOR = COLORS[color_name]
                     print(f"[SYSTEM] Color changed to {color_name}")
-                    continue  # don't send to server
-
-                # ----- /refresh command -----
-                if msg.strip() == "/refresh":
-                    clear_terminal()
-                    encoded = encode_message(username, "/refresh")
-                    tls_sock.sendall(encoded)
                     continue
 
-                # ----- NORMAL CHAT MESSAGE -----
-                encoded = encode_message(username, msg)
-                tls_sock.sendall(encoded)
+                # ===== REMOTE COMMAND: /refresh =====
+                if msg == "/refresh":
+                    clear_terminal()
+                    tls_sock.sendall(encode_message(username, "/refresh"))
+                    continue
+
+                # ===== NORMAL MESSAGE =====
+                tls_sock.sendall(encode_message(username, msg))
 
             except KeyboardInterrupt:
-                print("\nExiting...")
-                break
-
+                print("\n[SYSTEM] Interrupted. Closing client...")
+                tls_sock.close()
+                sys.exit(0)
 
 if __name__ == "__main__":
     start_client()

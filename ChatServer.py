@@ -7,17 +7,22 @@ from chatcore.tls import create_server_context, wrap_server_connection
 from chatcore.state import ChatState
 from chatcore.commands import CommandContext, handle_command
 
-HOST = "10.0.0.115"   # adjust if needed
+HOST = "10.0.0.115"     # change if needed
 PORT = 5555
 
-clients = []          # list of active client sockets
-state = ChatState()   # shared in-memory chat history
+clients = []            # active TLS sockets
+state = ChatState()     # shared message history
+
+# ----- CLIENT ID MANAGEMENT -----
+next_client_id = 0                  # will increment per client
+client_ids = {}                     # conn -> numeric ID
+MAX_CLIENTS = 10000                 # hard user cap
 
 
 def send_full_history(conn):
     """
-    Send the entire chat history (with IDs) to a single client.
-    Used by the /refresh command.
+    Sends the entire chat history to a single client.
+    Each message is shown with its message ID (#n).
     """
     for msg in state.all_messages():
         display_text = f"#{msg['id']} {msg['text']}"
@@ -30,11 +35,21 @@ def send_full_history(conn):
 
 def handle_client(conn, addr):
     """
-    Per-client handler: receive messages, route commands,
-    and broadcast chat to others.
+    Handle a single client connection.
+    Parses commands and broadcasts messages with unique sender IDs.
     """
+    global next_client_id
+
     on_client_join(addr)
     clients.append(conn)
+
+    # ---- ASSIGN CLIENT ID ----
+    client_id = next_client_id
+    next_client_id += 1
+    client_ids[conn] = client_id
+
+    # Tell the client their unique ID
+    conn.sendall(encode_message("SYSTEM", f"/id {client_id}"))
 
     try:
         while True:
@@ -46,7 +61,7 @@ def handle_client(conn, addr):
             if text is None:
                 continue
 
-            # Build command context for this message
+            # Build command context
             ctx = CommandContext(
                 conn=conn,
                 sender=sender,
@@ -56,28 +71,35 @@ def handle_client(conn, addr):
                 broadcast_message=broadcast_message,
             )
 
-            # 1) If the text is a command (starts with "/"), handle it
+            # 1) Run commands like /refresh, /delete
             if handle_command(ctx, text):
-                # Command was processed (or rejected). Do not treat as chat.
-                continue
+                continue  # command handled, skip normal broadcast
 
-            # 2) Normal chat message: store + broadcast with ID
+            # 2) NORMAL MESSAGE → store and broadcast
             stored = state.add_message(sender, text)
             display_text = f"#{stored['id']} {text}"
 
-            print(f"[{sender}] {display_text}")
+            # sender label WITH ID
+            sender_id = client_ids[conn]
+            sender_label = f"{sender}#{sender_id:04d}"   # zero-padded 5 digits
 
-            payload = encode_message(sender, display_text)
-            # Broadcast to all clients (including sender)
-            broadcast_message(sender, payload, clients)
+            print(f"[{sender_label}] {display_text}")
+
+            payload = encode_message(sender_label, display_text)
+            broadcast_message(sender_label, payload, clients)
 
     except ConnectionResetError:
-        # Client disconnected abruptly
+        # client killed connection
         pass
 
     finally:
+        # cleanup
         if conn in clients:
             clients.remove(conn)
+
+        if conn in client_ids:
+            del client_ids[conn]
+
         on_client_leave(addr)
         conn.close()
 
@@ -85,6 +107,7 @@ def handle_client(conn, addr):
 def start_server():
     print(f"Server running on {HOST}:{PORT} ...")
 
+    # TLS configuration
     tls_context = create_server_context(
         certfile="server.crt",
         keyfile="server.key",
@@ -97,6 +120,13 @@ def start_server():
         while True:
             conn, addr = server.accept()
 
+            # PREVENT OVER-CAPACITY
+            if len(clients) >= MAX_CLIENTS:
+                conn.sendall(encode_message("SYSTEM", "Server full (10,000 users max)."))
+                conn.close()
+                continue
+
+            # TLS handshake
             try:
                 tls_conn = wrap_server_connection(conn, tls_context)
             except Exception as e:
@@ -107,7 +137,7 @@ def start_server():
             thread = threading.Thread(
                 target=handle_client,
                 args=(tls_conn, addr),
-                daemon=True,
+                daemon=True
             )
             thread.start()
 
