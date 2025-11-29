@@ -24,6 +24,16 @@ class ChatState:
             }
             self._messages.append(msg)
             return msg
+        
+    def search(self, query):
+        query = query.lower()
+        with self._lock:
+            return [
+                msg for msg in self._messages
+                if query in msg["text"].lower()
+            ]
+
+
 
     def delete_message(self, msg_id: int, requester: str) -> bool:
         """

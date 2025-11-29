@@ -50,6 +50,7 @@ def handle_client(conn, addr):
 
     # Tell the client their unique ID
     conn.sendall(encode_message("SYSTEM", f"/id {client_id}"))
+    
 
     try:
         while True:

@@ -95,3 +95,27 @@ def handle_command(ctx: CommandContext, text: str) -> bool:
 
     cmd(ctx, args)
     return True
+    
+
+
+
+
+def cmd_search(ctx, query):
+    if not query.strip():
+        ctx.conn.sendall(encode_message("SYSTEM", "Usage: /search <text>"))
+        return
+
+    matches = ctx.state.search(query)
+
+    if not matches:
+        ctx.conn.sendall(encode_message("SYSTEM", f"No messages contain '{query}'"))
+        return
+
+    ctx.conn.sendall(encode_message("SYSTEM", f"Found {len(matches)} match(es):"))
+
+    for msg in matches:
+        display = f"#{msg['id']} {msg['text']}"
+        payload = encode_message(msg["sender"], display)
+        ctx.conn.sendall(payload)
+
+COMMANDS["search"] = cmd_search
