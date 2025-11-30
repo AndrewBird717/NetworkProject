@@ -56,6 +56,11 @@ def listen(sock):
                 color = MY_COLOR if sender == username else COLORS["reset"]
 
                 # store message
+                if sender == "SYSTEM" and text.startswith("REFRESH_BEGIN"):
+                    CHAT_HISTORY.clear()
+                    continue
+
+
                 CHAT_HISTORY.append((sender, text))
 
                 clear_terminal()
@@ -105,7 +110,7 @@ def start_client():
                     continue
 
                 # ===== LOCAL COMMAND: /exit =====
-                if msg == "/exit":
+                if msg == "/exit" or msg == ".exit":
                     print("[SYSTEM] Exiting chat...")
                     tls_sock.close()
                     sys.exit(0)

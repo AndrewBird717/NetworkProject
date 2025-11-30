@@ -23,6 +23,8 @@ def cmd_refresh(ctx: CommandContext, args: str) -> None:
     Clears the client's screen (on client side) and re-sends history.
     Server side: just send full history to this client.
     """
+    ctx.conn.sendall(encode_message("SYSTEM", "REFRESH_BEGIN"))
+
     ctx.send_full_history(ctx.conn)
 
 
