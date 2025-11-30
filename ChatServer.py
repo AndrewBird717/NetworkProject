@@ -18,6 +18,8 @@ next_client_id = 0                  # will increment per client
 client_ids = {}                     # conn -> numeric ID
 MAX_CLIENTS = 10000                 # hard user cap
 
+client_usernames = {}
+
 
 def send_full_history(conn):
     """
@@ -49,6 +51,16 @@ def handle_client(conn, addr):
     client_ids[conn] = client_id
 
     # Tell the client their unique ID
+    if client_usernames == {}:
+        conn.sendall(encode_message("SYSTEM", f"No Connected Users"))
+    else:
+        temp = []
+        for _, username in client_usernames.items():
+            temp.append(username)
+        conn.sendall(encode_message("SYSTEM", f"Connected Users: {temp}"))
+
+
+
     conn.sendall(encode_message("SYSTEM", f"/id {client_id}"))
     
 
@@ -61,6 +73,10 @@ def handle_client(conn, addr):
             sender, text = decode_message(raw)
             if text is None:
                 continue
+            # Store username if first message from this client
+            if conn not in client_usernames:
+                client_usernames[conn] = sender
+
 
             # Build command context
             ctx = CommandContext(
@@ -77,12 +93,13 @@ def handle_client(conn, addr):
                 continue  # command handled, skip normal broadcast
 
             # 2) NORMAL MESSAGE → store and broadcast
-            stored = state.add_message(sender, text)
+            uname = client_usernames.get(conn, sender)
+            stored = state.add_message(uname, text)
             display_text = f"#{stored['id']} {text}"
 
             # sender label WITH ID
             sender_id = client_ids[conn]
-            sender_label = f"{sender}#{sender_id:04d}"   # zero-padded 5 digits
+            sender_label = f"{uname}#{sender_id:04d}"   # zero-padded 5 digits
 
             print(f"[{sender_label}] {display_text}")
 
