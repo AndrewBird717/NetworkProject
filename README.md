@@ -71,6 +71,7 @@ A GitHub repository was used to collaborate and track changes.
 - `/search` command
 - `/delete` command
 - `/refresh` command
+- `/color` command
 - TLS encryption for secure communication
 - Client join/leave announcements
 - Improved UI formatting
