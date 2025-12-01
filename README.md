@@ -129,10 +129,11 @@ tls_conn = wrap_server_connection(conn, tls_context)
 
 tls_context = create_client_context(verify=False)
 tls_sock = wrap_client_socket(sock, tls_context)
+```
 
 
-6. Feature Set Implemented
-Core Requirements
+## 6. Feature Set Implemented
+Core Requirements:
 
 Supports multiple clients
 
@@ -157,4 +158,3 @@ TLS encryption
 Persistent message history
 
 Client join/leave announcements
-
